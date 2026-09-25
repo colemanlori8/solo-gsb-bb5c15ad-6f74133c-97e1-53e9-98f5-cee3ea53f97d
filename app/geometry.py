@@ -97,14 +97,16 @@ def fresnel_transmittance(
     n1: float,
     n2: float,
 ) -> tuple[float, float, float, float] | None:
-    """单界面菲涅耳 s/p 功率透过率（忽略吸收，T = 1 - R）。
+    """单界面菲涅耳 s/p 功率透过率（数值稳定形式，与 1 - R 精确等价）。
 
     以光线方向与界面法线求入射角余弦 cos_i（光线从法线背面入射时翻转法线），
-    再由斯涅尔定律 sin_t = (n1/n2) sin_i 求折射角余弦 cos_t：
-        Rs = [(n1 cos_i - n2 cos_t)/(n1 cos_i + n2 cos_t)]²
-        Rp = [(n2 cos_i - n1 cos_t)/(n2 cos_i + n1 cos_t)]²
-    发生全反射（sin²t > 1）时返回 None。
-    返回 (cos_i, cos_t, 1 - Rs, 1 - Rp)。
+    再由斯涅尔定律 sin_t = (n1/n2) sin_i 求折射角余弦 cos_t。功率透过率按
+        Ts = 4·as·bs/(as+bs)²，as = n1·cos_i，bs = n2·cos_t
+        Tp = 4·ap·bp/(ap+bp)²，ap = n2·cos_i，bp = n1·cos_t
+    计算，实现时取 4·[a/(a+b)]·[b/(a+b)]：只含正项之和与不超过 1 的比值，
+    不发生 1 - R 的浮点抵消，折射率悬殊（如 1e-20 对 1）时仍能保留可表示
+    的微小正透过率。发生全反射（sin²t > 1）时返回 None。
+    返回 (cos_i, cos_t, Ts, Tp)。
     """
     nrm = normalize(normal)
     cos_i = _dot(direction, nrm)
@@ -116,9 +118,13 @@ def fresnel_transmittance(
     if sin2_t > 1.0:
         return None  # 全反射
     cos_t = math.sqrt(max(0.0, 1.0 - sin2_t))
-    r_s = (n1 * cos_i - n2 * cos_t) / (n1 * cos_i + n2 * cos_t)
-    r_p = (n2 * cos_i - n1 * cos_t) / (n2 * cos_i + n1 * cos_t)
-    return cos_i, cos_t, 1.0 - r_s * r_s, 1.0 - r_p * r_p
+    a_s, b_s = n1 * cos_i, n2 * cos_t
+    a_p, b_p = n2 * cos_i, n1 * cos_t
+    sum_s = a_s + b_s
+    sum_p = a_p + b_p
+    t_s = 4.0 * (a_s / sum_s) * (b_s / sum_s)
+    t_p = 4.0 * (a_p / sum_p) * (b_p / sum_p)
+    return cos_i, cos_t, t_s, t_p
 
 
 def ray_transmittance(
@@ -126,11 +132,12 @@ def ray_transmittance(
     status: str,
     interfaces: list[tuple[tuple[float, float], tuple[float, float], float]],
 ) -> tuple[float, float]:
-    """对一条已追迹光线逐界面累乘 s/p 功率透过率（各界面 T = 1 - R）。
+    """对一条已追迹光线逐界面累乘 s/p 功率透过率（数值稳定形式，见 fresnel_transmittance）。
 
     复用 trace_ray 的结果：仅对 status=completed 的光线，按界面对应顺序取
-    各折射段的入射方向与界面法线计算菲涅耳反射率；全反射或中途漏过界面
-    （status 非 completed）时整条光线透过率记 0。无界面时透过率为 (1, 1)。
+    各折射段的入射方向与界面法线计算菲涅耳功率透过率并逐界面累乘，可表示的
+    微小正透过率保留为正值；全反射或中途漏过界面（status 非 completed）时
+    整条光线透过率记 0。无界面时透过率为 (1, 1)。
     """
     if status != "completed":
         return 0.0, 0.0
@@ -294,13 +301,26 @@ def centroid_and_rms(
 def weighted_centroid(
     points: list[tuple[tuple[float, float], float]],
 ) -> tuple[float, float] | None:
-    """功率加权质心：sum(w·p)/sum(w)；权重总和为 0（或空集）时返回 None。"""
-    total = sum(w for _p, w in points)
-    if total <= EPS:
+    """功率加权质心：按相对功率（各权重除以最大权重）求 Σ(w·p)/Σ(w)。
+
+    权重先归一化到 [0, 1] 再累加，与直接 Σ(w·p)/Σ(w) 数学等价，但避免
+    悬殊折射率下微小功率（如 1e-20 量级）与坐标相乘时浮点下溢；仅当权重
+    总和确为 0（或空集）时返回 None。
+    """
+    if not points:
         return None
-    cx = sum(w * p[0] for p, w in points) / total
-    cy = sum(w * p[1] for p, w in points) / total
-    return (cx, cy)
+    scale = max(w for _p, w in points)
+    if scale <= 0.0:
+        return None  # 全部权重为 0：有效功率确为零
+    norm = 0.0
+    cx = 0.0
+    cy = 0.0
+    for p, w in points:
+        r = w / scale
+        norm += r
+        cx += r * p[0]
+        cy += r * p[1]
+    return (cx / norm, cy / norm)
 
 
 def cauchy_refractive_index(a: float, b: float, wavelength_um: float) -> float:

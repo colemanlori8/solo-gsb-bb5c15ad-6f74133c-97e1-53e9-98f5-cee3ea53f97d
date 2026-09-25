@@ -273,14 +273,14 @@ curl -X POST http://localhost:8000/api/aperture-beam-evaluations \
 
 `POST /api/power-evaluations` 在光束请求（起点、中心方向、折射率、顺序界面、观察线、半角、采样数）基础上增加 `s_fraction`（s 偏振入射功率占比，取值 0～1，p 偏振占 `1 - s_fraction`），复用同一套扇形采样与光线追迹，逐界面按**菲涅耳公式**计算 s/p 偏振的功率反射率与透过率。该接口为即时计算，结果不写入数据库。
 
-- 以光线方向与界面法线求入射角余弦 `cos_i`（光线从法线背面入射时翻转法线），由斯涅尔定律 `sin_t = (n1/n2) sin_i` 求折射角余弦 `cos_t`：
-  - `Rs = [(n1 cos_i - n2 cos_t)/(n1 cos_i + n2 cos_t)]²`
-  - `Rp = [(n2 cos_i - n1 cos_t)/(n2 cos_i + n1 cos_t)]²`
-  - 逐界面累乘**功率透过率** `1 - R`：`Ts = ∏(1 - Rs)`、`Tp = ∏(1 - Rp)`。
+- 以光线方向与界面法线求入射角余弦 `cos_i`（光线从法线背面入射时翻转法线），由斯涅尔定律 `sin_t = (n1/n2) sin_i` 求折射角余弦 `cos_t`；单界面 s/p **功率透过率**按数值稳定形式计算（与 `1 - R` 精确等价，但只含正项之和与不超过 1 的比值，折射率悬殊时不发生 `1 - R` 的浮点抵消）：
+  - `Ts = 4·as·bs/(as+bs)²`，其中 `as = n1 cos_i`、`bs = n2 cos_t`
+  - `Tp = 4·ap·bp/(ap+bp)²`，其中 `ap = n2 cos_i`、`bp = n1 cos_t`
+  - 逐界面累乘：`Ts = ∏Ts_i`、`Tp = ∏Tp_i`；可表示的微小正透过率（如介质折射率相差 1e20 倍时的 1e-20 量级）保留为正值，不误判为零。
 - 每条光线入射功率为 **1**，按占比混合：`power = s_fraction · Ts + (1 - s_fraction) · Tp`。
 - **全反射**（任一束光线追迹状态为 `total_internal_reflection`）或**漏过界面**（`no_intersection`，与界面平行或交点在反方向）时该光线记**零功率**（`Ts = Tp = power = 0`）。
-- 仅**追迹完成且与观察线有前向交点**的光线计入**有效功率**（其 `power` 之和）与**功率加权质心** `Σ(power·point)/Σpower`；追迹完成但观察线无交点的光线有透过率但不计入。
-- `total_input_power` 为总入射功率（等于光线数，每条入射功率为 1）；有效功率为零时 `weighted_centroid` 为 `null`。
+- 仅**追迹完成且与观察线有前向交点**的光线计入**有效功率**（其 `power` 之和）与**功率加权质心**（按相对功率加权，与 `Σ(power·point)/Σpower` 等价）；追迹完成但观察线无交点的光线有透过率但不计入。
+- `total_input_power` 为总入射功率（等于光线数，每条入射功率为 1）；仅当有效功率**确为零**时 `weighted_centroid` 为 `null`。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -345,7 +345,7 @@ curl -X POST http://localhost:8000/api/power-evaluations \
 
 - `total_input_power`：总入射功率，恒等于 `ray_count`（每条光线入射功率为 1）。
 - `effective_power`：有效功率，仅累加追迹完成且与观察线有前向交点的光线的 `power`。
-- `weighted_centroid`：有效光线按 `power` 加权的质心；有效功率为 0 时为 `null`。
+- `weighted_centroid`：有效光线按 `power` 加权的质心；仅当有效功率确为 0 时为 `null`。
 - `rays[].transmittance_s` / `transmittance_p`：该光线逐界面累乘的 s/p 总透过率（`0～1`）；全反射或漏过界面时为 `0`；无界面时为 `1`。
 - `rays[].power`：按 `s_fraction` 混合后的该光线功率；`observation_point` 为观察线前向交点，无效时为 `null`。
 
