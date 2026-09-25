@@ -308,10 +308,11 @@ def evaluate_power(req: PowerRequest) -> dict:
     """复用光束评估的扇形采样与光线追迹，按菲涅耳公式评估 s/p 偏振透过功率。
 
     每条光线入射功率为 1，s/p 偏振分别占 s_fraction 与 1 - s_fraction；
-    逐界面由方向与法线求 cos_i、cos_t，按
-        Rs=[(n1 cos_i-n2 cos_t)/(n1 cos_i+n2 cos_t)]²、
-        Rp=[(n2 cos_i-n1 cos_t)/(n2 cos_i+n1 cos_t)]²
-    累乘透过率 1 - R。全反射或漏过界面（追迹未完成）记零功率；仅追迹完成
+    逐界面由方向与法线求 cos_i、cos_t，按数值稳定的功率透过率
+        Ts=4ab/(a+b)²（a=n1 cos_i，b=n2 cos_t）、
+        Tp=4a'b'/(a'+b')²（a'=n2 cos_i，b'=n1 cos_t）
+    （与 1-Rs、1-Rp 数学等价，避免折射率悬殊时 1-R 的浮点抵消）累乘。
+    全反射或漏过界面（追迹未完成）记零功率；仅追迹完成
     且与观察线有前向交点的光线计入有效功率与功率加权质心，有效功率为零时
     质心为 null。该接口为即时计算，结果不写入数据库。
     """

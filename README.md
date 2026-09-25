@@ -276,7 +276,7 @@ curl -X POST http://localhost:8000/api/aperture-beam-evaluations \
 - 以光线方向与界面法线求入射角余弦 `cos_i`（光线从法线背面入射时翻转法线），由斯涅尔定律 `sin_t = (n1/n2) sin_i` 求折射角余弦 `cos_t`：
   - `Rs = [(n1 cos_i - n2 cos_t)/(n1 cos_i + n2 cos_t)]²`
   - `Rp = [(n2 cos_i - n1 cos_t)/(n2 cos_i + n1 cos_t)]²`
-  - 逐界面累乘**功率透过率** `1 - R`：`Ts = ∏(1 - Rs)`、`Tp = ∏(1 - Rp)`。
+  - 逐界面累乘**功率透过率** `1 - R`：`Ts = ∏(1 - Rs)`、`Tp = ∏(1 - Rp)`；实现上采用数值稳定的等价形式 `Ts = 4 n1 cos_i n2 cos_t / (n1 cos_i + n2 cos_t)²`、`Tp = 4 n1 cos_i n2 cos_t / (n2 cos_i + n1 cos_t)²`，避免折射率悬殊（如 `n_start` 极小）时 `1 - R` 的浮点抵消，保留可表示的微小正透过率。
 - 每条光线入射功率为 **1**，按占比混合：`power = s_fraction · Ts + (1 - s_fraction) · Tp`。
 - **全反射**（任一束光线追迹状态为 `total_internal_reflection`）或**漏过界面**（`no_intersection`，与界面平行或交点在反方向）时该光线记**零功率**（`Ts = Tp = power = 0`）。
 - 仅**追迹完成且与观察线有前向交点**的光线计入**有效功率**（其 `power` 之和）与**功率加权质心** `Σ(power·point)/Σpower`；追迹完成但观察线无交点的光线有透过率但不计入。
